@@ -1,0 +1,94 @@
+# Install required packages
+!pip install pillow pandas
+
+# Mount Google Drive
+from google.colab import drive
+drive.mount('/content/drive')
+
+
+
+import os
+import pandas as pd
+from PIL import Image, UnidentifiedImageError
+import requests
+from io import BytesIO
+import zipfile
+
+# ✅ Set paths
+base_path = '/content/drive/MyDrive/Feelo_Images_Automation'
+csv_path = os.path.join(base_path, 'dealsList.csv')
+output_dir = os.path.join(base_path, 'output_images')
+feelo_logo_path = os.path.join(base_path, 'feelo_logo.png')
+zip_path = os.path.join(base_path, "feelo_cover_images.zip")
+
+os.makedirs(output_dir, exist_ok=True)
+
+# ✅ Overwrite CSV with new data
+data = {
+    'Deal Title': ['Buy 1 Burger & Get 1 Free'],
+    'Vendor Name': ['Burger Cottage'],
+    'Background Image URL': ['https://drive.google.com/file/d/11rPSerAM3FYwQ4mZ5qe6RDvJ1GSPioCS/view?usp=sharing'],
+    'Vendor Logo URL': ['https://drive.google.com/file/d/1DTLGmKrj3jFUiOodE6KlN_M1MN-VewVH/view?usp=sharing'],
+    'Output File Name': ['burger_cottage_deal']
+}
+df = pd.DataFrame(data)
+df.to_csv(csv_path, index=False)
+print(f"✅ CSV updated with 1 row at: {csv_path}")
+
+# ✅ Load Feelo logo
+try:
+    feelo_logo = Image.open(feelo_logo_path).convert("RGBA").resize((150, 150))
+    print("✅ Feelo logo loaded")
+except:
+    feelo_logo = None
+    print("❌ Feelo logo missing — skipping image generation")
+
+# ✅ Convert Google Drive link to direct
+def convert_drive_link(link):
+    if "drive.google.com" in link:
+        if "id=" in link:
+            file_id = link.split("id=")[-1]
+        elif "/d/" in link:
+            file_id = link.split("/d/")[1].split("/")[0]
+        else:
+            return None
+        return f"https://drive.google.com/uc?export=download&id={file_id}"
+    return link
+
+# ✅ Image creation loop
+for idx, row in df.iterrows():
+    try:
+        output_name = row['Output File Name']
+        print(f"\n🔄 Working on: {output_name}")
+
+        if feelo_logo is None:
+            print(f"❌ Skipped {output_name}: Feelo logo not loaded")
+            continue
+
+        # Convert and download background
+        bg_url = convert_drive_link(row['Background Image URL'])
+        bg_resp = requests.get(bg_url)
+        if bg_resp.status_code != 200:
+            raise Exception("Background image not accessible")
+        bg_img = Image.open(BytesIO(bg_resp.content)).convert("RGBA").resize((1080, 1080))
+
+        # Convert and download vendor logo
+        vendor_url = convert_drive_link(row['Vendor Logo URL'])
+        logo_resp = requests.get(vendor_url)
+        if logo_resp.status_code != 200:
+            raise Exception("Vendor logo not accessible")
+        vendor_logo = Image.open(BytesIO(logo_resp.content)).convert("RGBA").resize((150, 150))
+
+        # Paste logos
+        bg_img.paste(feelo_logo, (30, 30), feelo_logo)
+        bg_img.paste(vendor_logo, (900, 30), vendor_logo)
+
+        # Save final image
+        out_path = os.path.join(output_dir, f"{output_name}.png")
+        bg_img.save(out_path)
+        print(f"✅ Created: {output_name}.png")
+
+    except UnidentifiedImageError:
+        print(f"❌ Skipped {row['Output File Name']}: File is not a valid image")
+    except Exception as e:
+        print(f"❌ Skipped {row['Output File Name']}: {str(e)}")
